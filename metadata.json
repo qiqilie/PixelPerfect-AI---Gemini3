@@ -1,0 +1,7 @@
+{
+  "name": "PixelPerfect AI",
+  "description": "Convert UI designs into production-ready frontend code with 100% fidelity using Gemini Vision.",
+  "requestFramePermissions": [
+    "camera"
+  ]
+}
