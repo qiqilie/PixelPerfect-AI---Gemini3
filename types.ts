@@ -4,7 +4,10 @@ export enum Framework {
   Bootstrap = 'HTML + Bootstrap',
   AntDesign = 'React + Ant Design',
   VueAntDesign = 'Vue 3 + Ant Design Vue',
+  VueElementPlus = 'Vue 3 + Element Plus',
+  VueVant = 'Vue 3 + Vant',
   WeChatMiniprogram = 'WeChat Mini Program',
+  ReactTaro = 'React + Taro',
 }
 
 export enum Platform {
@@ -12,16 +15,34 @@ export enum Platform {
   Mobile = 'Mobile App',
 }
 
+export interface DesignTokens {
+  colors: { name: string; hex: string }[];
+  typography: { element: string; fontSize: string; fontWeight: string }[];
+  spacing: string[];
+}
+
+export interface HistoryItem {
+  id: string;
+  code: string;
+  timestamp: number;
+  screenshot?: string;
+  tokens?: DesignTokens;
+}
+
 export interface GenerationSettings {
   framework: Framework;
   platform: Platform;
   useSemanticTags: boolean;
   includeComments: boolean;
+  apiKey?: string;
+  model: string;
 }
 
-export interface AnalysisResult {
-  code: string;
-  explanation: string;
-}
+export type ProcessingStatus = 'idle' | 'analyzing' | 'generating' | 'complete' | 'error' | 'refining';
 
-export type ProcessingStatus = 'idle' | 'analyzing' | 'generating' | 'complete' | 'error';
+export interface ChatMessage {
+  id: string;
+  role: 'user' | 'assistant';
+  content: string;
+  timestamp: number;
+}

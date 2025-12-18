@@ -1,51 +1,45 @@
-import { GoogleGenAI } from "@google/genai";
-import { Framework, GenerationSettings } from '../types';
+import { GoogleGenAI, Type } from "@google/genai";
+import { Framework, GenerationSettings, DesignTokens } from '../types';
 
 const getSystemInstruction = (settings: GenerationSettings): string => {
-  const isVue = settings.framework === Framework.VueAntDesign;
+  const isVue = settings.framework.includes('Vue');
+  const isReact = settings.framework.includes('React');
   const isWeChat = settings.framework === Framework.WeChatMiniprogram;
+  const isTaro = settings.framework === Framework.ReactTaro;
 
   return `
-You are an expert Senior Frontend Engineer and UI/UX Designer specializing in pixel-perfect design reproduction.
-Your goal is to analyze a UI image and generate exact, production-ready code that replicates the visual design 100%.
+You are the world's leading Senior Frontend Architect and UI/UX Design Specialist.
+Your goal is to transform a UI image into pixel-perfect, enterprise-grade frontend code.
 
-**Role & Capability:**
-- You have advanced vision capabilities to perform semantic segmentation mentally, identifying every button, input, text block, icon, and layout container.
-- You understand spacing, typography, color palettes, and visual hierarchy deeply.
+**OUTPUT PROTOCOL:**
+You must provide your response in a structured format:
+1. **Design Tokens**: Extract the primary/secondary colors, fonts, and spacing found in the image.
+2. **Implementation Code**: The complete, production-ready code for the requested framework.
 
-**Output Configuration:**
-- **Framework**: ${settings.framework}
-- **Platform**: ${settings.platform} (Ensure responsive design appropriate for this platform)
-- **Semantic HTML**: ${settings.useSemanticTags ? 'Yes (use <header>, <main>, <section> etc)' : 'Standard <div> is acceptable'}
-- **Comments**: ${settings.includeComments ? 'Detailed comments explaining layout choices' : 'Minimal comments'}
+**Enterprise Standards:**
+- **Code Quality**: Use absolute fidelity. Capture every shadow, border-radius, and micro-interaction intent.
+- **Dynamic Binding**: Define a 'mockData' object or 'reactive' state. Map through data for lists.
+- **Responsiveness**: Use the platform ${settings.platform} to guide your layout.
+- **Library Usage**:
+  ${isReact ? `- React: Use functional components, Lucide icons, and Tailwind/AntD as requested.` : ''}
+  ${isVue ? `- Vue 3: Use <script setup lang="ts">. Use Element Plus/Vant/AntD components correctly.` : ''}
+  ${isTaro ? `- Taro: Use @tarojs/components. Use rpx for styling.` : ''}
 
-**Strict Guidelines:**
-1. **Fidelity**: The code must look *exactly* like the image. Pay attention to padding, margins, border-radius, shadows, and font weights.
-2. **Icons (CRITICAL)**: 
-   - **React**: Use 'lucide-react' imports (e.g., \`import { Home, User } from 'lucide-react'\`).
-   - **Vue**: Use '@ant-design/icons-vue' imports.
-   - **WeChat Mini Program**: Use inline SVG data URIs in <image> tags (e.g. <image src="data:image/svg+xml..."/>) or standard WeChat icon classes if applicable. Do not require external file downloads.
-   - **HTML**: Use FontAwesome CDN classes (e.g., <i class="fa-solid fa-home"></i>) or inline SVG.
-   - **General**: Identify the specific icon type (menu, user, arrow, heart, etc.) and use the most appropriate match.
-3. **Images**: Use 'https://picsum.photos/id/[random_number]/[width]/[height]' for realistic placeholders.
-4. **Content**: Transcribe text from the image where possible.
-5. **Responsiveness**: Ensure the layout works on the specified platform.
-6. **No External CSS**: 
-   - Tailwind: Use utility classes exclusively.
-   - Bootstrap: Use standard classes.
-   - Ant Design: Use the component's 'style' prop or generic inline styles if absolutely necessary for custom spacing, but prefer component props.
-   - WeChat: Generate WXSS using 'rpx' units for responsiveness.
-7. **Complete Code**: Return the full, working component code.
-${isVue ? '8. **Vue Format**: Generate a single valid .vue file with <script setup lang="ts"> and <template>. Do NOT use separate files.' : ''}
-${isWeChat ? '8. **WeChat Format**: Generate a SINGLE code block containing the WXML, WXSS, and JS. Use separator comments like `<!-- index.wxml -->`, `/* index.wxss */`, and `// index.js` to distinguish sections clearly.' : ''}
+**Specific Requirements for ${settings.framework}:**
+- Generate clean, modular, and type-safe code.
+- Ensure all imports are correct.
 
-If the image is a wireframe, interpret it as a high-fidelity modern UI with good design taste.
+**Response Structure (CRITICAL):**
+Your response should start with a JSON block for tokens, then the code.
+[TOKENS_START]
+{ "colors": [{"name": "primary", "hex": "#..."}], "typography": [{"element": "h1", "fontSize": "24px", "fontWeight": "bold"}], "spacing": ["4px", "8px"] }
+[TOKENS_END]
+[CODE_START]
+...source code...
+[CODE_END]
 `;
 };
 
-/**
- * Compresses and resizes the image to avoid large payload errors.
- */
 const compressImage = (base64Str: string, maxWidth = 1024): Promise<string> => {
   return new Promise((resolve) => {
     const img = new Image();
@@ -54,20 +48,17 @@ const compressImage = (base64Str: string, maxWidth = 1024): Promise<string> => {
       const canvas = document.createElement('canvas');
       let width = img.width;
       let height = img.height;
-
       if (width > maxWidth) {
         height = (height * maxWidth) / width;
         width = maxWidth;
       }
-
       canvas.width = width;
       canvas.height = height;
       const ctx = canvas.getContext('2d');
       if (ctx) {
-        ctx.fillStyle = '#FFFFFF'; // Handle transparent PNGs by giving them a white background
+        ctx.fillStyle = '#FFFFFF';
         ctx.fillRect(0, 0, width, height);
         ctx.drawImage(img, 0, 0, width, height);
-        // Compress to JPEG at 0.8 quality
         resolve(canvas.toDataURL('image/jpeg', 0.8));
       } else {
         resolve(base64Str);
@@ -80,25 +71,18 @@ const compressImage = (base64Str: string, maxWidth = 1024): Promise<string> => {
 export const generateCodeFromImage = async (
   base64Image: string, 
   settings: GenerationSettings
-): Promise<string> => {
-  if (!process.env.API_KEY) {
-    throw new Error("API Key is missing. Please set the API_KEY environment variable.");
-  }
+): Promise<{ code: string; tokens: DesignTokens }> => {
+  const apiKey = settings.apiKey || process.env.API_KEY;
+  if (!apiKey) throw new Error("API Key is missing.");
 
-  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-  const modelId = 'gemini-2.5-flash'; 
+  const ai = new GoogleGenAI({ apiKey });
+  const modelId = settings.model || 'gemini-3-flash-preview';
 
-  const prompt = `
-    Analyze the attached UI design image. 
-    1. Perform a visual breakdown of the layout (header, sidebar, content area, etc.).
-    2. Identify the color palette and typography styles.
-    3. Generate the full source code to implement this interface.
-    
-    Return ONLY the code block. Do not include markdown formatting like \`\`\`tsx, \`\`\`vue or \`\`\`html at the start/end of the response, just the raw code.
-  `;
+  const prompt = `Perform an architectural analysis of this design and implement it. 
+  1. Extract design tokens. 
+  2. Write production code for ${settings.framework}.`;
 
   try {
-    // Optimization: Resize/Compress image to prevent 500/XHR errors due to payload size
     const compressedImage = await compressImage(base64Image);
     const cleanBase64 = compressedImage.replace(/^data:image\/(png|jpeg|jpg|webp);base64,/, '');
 
@@ -106,15 +90,8 @@ export const generateCodeFromImage = async (
       model: modelId,
       contents: {
         parts: [
-          {
-            inlineData: {
-              mimeType: 'image/jpeg', // We converted to jpeg in compressImage
-              data: cleanBase64
-            }
-          },
-          {
-            text: prompt
-          }
+          { inlineData: { mimeType: 'image/jpeg', data: cleanBase64 } },
+          { text: prompt }
         ]
       },
       config: {
@@ -123,15 +100,70 @@ export const generateCodeFromImage = async (
       }
     });
 
-    let code = response.text || "// No code generated";
+    const text = response.text || "";
     
-    // Cleanup markdown if the model disregarded the instruction
+    // Default empty tokens
+    let tokens: DesignTokens = { colors: [], typography: [], spacing: [] };
+    
+    // Parse Tokens with fallbacks
+    const tokenMatch = text.match(/\[TOKENS_START\]([\s\S]*?)\[TOKENS_END\]/);
+    if (tokenMatch) {
+      try {
+        const parsed = JSON.parse(tokenMatch[1]);
+        tokens = {
+          colors: Array.isArray(parsed.colors) ? parsed.colors : [],
+          typography: Array.isArray(parsed.typography) ? parsed.typography : [],
+          spacing: Array.isArray(parsed.spacing) ? parsed.spacing : []
+        };
+      } catch (e) {
+        console.warn("Failed to parse design tokens JSON", e);
+      }
+    }
+    
+    // Parse Code
+    const codeMatch = text.match(/\[CODE_START\]([\s\S]*?)\[CODE_END\]/);
+    let code = codeMatch ? codeMatch[1].trim() : text;
     code = code.replace(/^```(tsx|jsx|html|css|vue|javascript|xml)?\n/, '').replace(/```$/, '');
-    
-    return code;
 
+    return { code, tokens };
   } catch (error) {
     console.error("Gemini Vision Error:", error);
-    throw new Error("Failed to analyze image. Try a smaller image or check your connection.");
+    throw error;
+  }
+};
+
+export const refineCode = async (
+  currentCode: string,
+  instruction: string,
+  settings: GenerationSettings
+): Promise<string> => {
+  const apiKey = settings.apiKey || process.env.API_KEY;
+  if (!apiKey) throw new Error("API Key is missing.");
+  const ai = new GoogleGenAI({ apiKey });
+  const modelId = settings.model || 'gemini-3-flash-preview';
+
+  const prompt = `
+    Current Enterprise Code:
+    \`\`\`
+    ${currentCode}
+    \`\`\`
+    Refinement Request: "${instruction}"
+    Return ONLY the full updated source code without any extra text or markdown wrappers.
+  `;
+
+  try {
+    const response = await ai.models.generateContent({
+      model: modelId,
+      contents: { parts: [{ text: prompt }] },
+      config: {
+        systemInstruction: getSystemInstruction(settings),
+        temperature: 0.2, 
+      }
+    });
+    let code = response.text || "";
+    code = code.replace(/^```(tsx|jsx|html|css|vue|javascript|xml)?\n/, '').replace(/```$/, '');
+    return code;
+  } catch (error) {
+    throw error;
   }
 };
